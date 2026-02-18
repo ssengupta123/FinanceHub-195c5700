@@ -521,6 +521,12 @@ export async function registerRoutes(
             results[sheetName] = await importPersonalHours(ws);
           } else if (sheetName === "Project Hours") {
             results[sheetName] = await importProjectHours(ws);
+          } else if (sheetName === "CX Master List") {
+            results[sheetName] = await importCxMasterList(ws);
+          } else if (sheetName === "Project Resource Cost") {
+            results[sheetName] = await importProjectResourceCost(ws);
+          } else if (sheetName === "Project Resource Cost A&F") {
+            results[sheetName] = await importProjectResourceCostAF(ws);
           } else {
             results[sheetName] = { imported: 0, errors: ["Import not supported for this sheet"] };
           }
@@ -782,11 +788,12 @@ async function importJobStatus(ws: XLSX.WorkSheet): Promise<{ imported: number; 
   const existingNames = new Set(existingProjects.map(p => p.name.toLowerCase()));
   let codeCounter = existingProjects.length + 1;
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r[3]) continue;
     try {
       const projectName = String(r[3]).trim();
+      if (!projectName || projectName.toLowerCase() === "project" || projectName.toLowerCase() === "project name" || projectName.toLowerCase() === "name") continue;
       if (existingNames.has(projectName.toLowerCase())) {
         errors.push(`Row ${i + 2}: Skipped duplicate project "${projectName}"`);
         continue;
@@ -881,7 +888,7 @@ async function importStaffSOT(ws: XLSX.WorkSheet): Promise<{ imported: number; e
   const existingCodes = new Set(existingEmployees.map(e => e.employeeCode));
   let codeCounter = Date.now() % 100000;
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r[0]) continue;
     try {
@@ -1094,17 +1101,16 @@ async function importPersonalHours(ws: XLSX.WorkSheet): Promise<{ imported: numb
       let projectId = projName ? projMap.get(projName) : null;
       if (!projectId && projName) {
         const origName = String(r[9]).trim();
-        const isNonProject = /^\d+$/.test(origName) || /^Reason\s/i.test(origName);
-        if (isNonProject) continue;
 
-        const codeParts = origName.match(/^([A-Z]{2,6}\d{2,4}[-\s]?\d{0,3})\s+(.+)$/i);
-        let pCode = codeParts ? codeParts[1].replace(/\s+/g, '') : `A${projCounter++}`;
-        while (projCodes.has(pCode)) pCode = `A${projCounter++}`;
+        const isInternal = /^\d+$/.test(origName) || /^Reason\s/i.test(origName);
+        const codeParts = isInternal ? null : origName.match(/^([A-Z]{2,6}\d{2,4}[-\s]?\d{0,3})\s+(.+)$/i);
+        let pCode = codeParts ? codeParts[1].replace(/\s+/g, '') : `INT${projCounter++}`;
+        while (projCodes.has(pCode)) pCode = `INT${projCounter++}`;
         projCodes.add(pCode);
         const newProj = await storage.createProject({
-          projectCode: pCode, name: origName.substring(0, 200), client: codeParts ? codeParts[1].replace(/[\d\-]/g, '') : "Unknown",
+          projectCode: pCode, name: origName.substring(0, 200), client: codeParts ? codeParts[1].replace(/[\d\-]/g, '') : (isInternal ? "Internal" : "Unknown"),
           clientCode: null, clientManager: null, engagementManager: null, engagementSupport: null,
-          contractType: "time_materials", billingCategory: null, workType: null, panel: null,
+          contractType: "time_materials", billingCategory: null, workType: isInternal ? "Internal" : null, panel: null,
           recurring: null, vat: null, pipelineStatus: "C", adStatus: "Active", status: "active",
           startDate: null, endDate: null, workOrderAmount: "0", budgetAmount: "0", actualAmount: "0",
           balanceAmount: "0", forecastedRevenue: "0", forecastedGrossCost: "0", contractValue: "0",
@@ -1162,19 +1168,18 @@ async function importProjectHours(ws: XLSX.WorkSheet): Promise<{ imported: numbe
     if (!r || !r[3]) continue;
     try {
       const projectDesc = String(r[3]).trim();
-      const isNonProject = /^\d+$/.test(projectDesc) || /^Reason\s/i.test(projectDesc);
-      if (isNonProject) continue;
+      const isInternal = /^\d+$/.test(projectDesc) || /^Reason\s/i.test(projectDesc);
 
       let match = projMap.get(projectDesc.toLowerCase());
       if (!match) {
-        const codeParts = projectDesc.match(/^([A-Z]{2,6}\d{2,4}[-\s]?\d{0,3})\s+(.+)$/i);
-        let pCode = codeParts ? codeParts[1].replace(/\s+/g, '') : `A${projCounter++}`;
-        while (projCodes.has(pCode)) pCode = `A${projCounter++}`;
+        const codeParts = isInternal ? null : projectDesc.match(/^([A-Z]{2,6}\d{2,4}[-\s]?\d{0,3})\s+(.+)$/i);
+        let pCode = codeParts ? codeParts[1].replace(/\s+/g, '') : `INT${projCounter++}`;
+        while (projCodes.has(pCode)) pCode = `INT${projCounter++}`;
         projCodes.add(pCode);
         match = await storage.createProject({
-          projectCode: pCode, name: projectDesc.substring(0, 200), client: codeParts ? codeParts[1].replace(/[\d\-]/g, '') : "Unknown",
+          projectCode: pCode, name: projectDesc.substring(0, 200), client: codeParts ? codeParts[1].replace(/[\d\-]/g, '') : (isInternal ? "Internal" : "Unknown"),
           clientCode: null, clientManager: null, engagementManager: null, engagementSupport: null,
-          contractType: "time_materials", billingCategory: null, workType: null, panel: null,
+          contractType: "time_materials", billingCategory: null, workType: isInternal ? "Internal" : null, panel: null,
           recurring: null, vat: null, pipelineStatus: "C", adStatus: "Active", status: "active",
           startDate: null, endDate: null, workOrderAmount: "0", budgetAmount: "0", actualAmount: "0",
           balanceAmount: "0", forecastedRevenue: "0", forecastedGrossCost: "0", contractValue: "0",
@@ -1201,6 +1206,214 @@ async function importProjectHours(ws: XLSX.WorkSheet): Promise<{ imported: numbe
         utilization: r[0] ? toNum((Number(r[0]) / 2080) * 100) : "0",
       });
       imported++;
+    } catch (err: any) {
+      errors.push(`Row ${i + 1}: ${err.message}`);
+    }
+  }
+  return { imported, errors };
+}
+
+async function importCxMasterList(ws: XLSX.WorkSheet): Promise<{ imported: number; errors: string[] }> {
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+  let imported = 0;
+  const errors: string[] = [];
+
+  const allProjects = await storage.getProjects();
+  const projByName = new Map<string, number>();
+  const projByBaseCode = new Map<string, number>();
+  for (const p of allProjects) {
+    projByName.set(p.name.toLowerCase(), p.id);
+    if (p.projectCode) projByName.set(p.projectCode.toLowerCase(), p.id);
+    const baseMatch = p.name.match(/^([A-Z]{2,6}\d{2,4})/i);
+    if (baseMatch) {
+      const baseCode = baseMatch[1].toLowerCase();
+      if (!projByBaseCode.has(baseCode)) projByBaseCode.set(baseCode, p.id);
+    }
+  }
+
+  const allEmployees = await storage.getEmployees();
+  const empMap = new Map<string, number>();
+  for (const e of allEmployees) {
+    const fullName = `${e.firstName} ${e.lastName}`.toLowerCase().trim();
+    empMap.set(fullName, e.id);
+    if (e.lastName) empMap.set(e.lastName.toLowerCase(), e.id);
+  }
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !r[0]) continue;
+    try {
+      const engagementName = String(r[0]).trim();
+      if (!engagementName || engagementName.toLowerCase() === "engagement name") continue;
+
+      let projectId: number | null = null;
+      const exactMatch = projByName.get(engagementName.toLowerCase());
+      if (exactMatch) {
+        projectId = exactMatch;
+      }
+      if (!projectId) {
+        const codePart = engagementName.match(/^([A-Z]{2,6}\d{2,4})/i);
+        if (codePart) {
+          projectId = projByBaseCode.get(codePart[1].toLowerCase()) || null;
+        }
+      }
+      if (!projectId) {
+        const entries = Array.from(projByName.entries());
+        for (const [key, id] of entries) {
+          if (engagementName.toLowerCase().includes(key) || key.includes(engagementName.toLowerCase())) {
+            projectId = id;
+            break;
+          }
+        }
+      }
+
+      const resourceName = r[3] ? String(r[3]).trim() : null;
+      let employeeId: number | null = null;
+      if (resourceName) {
+        employeeId = empMap.get(resourceName.toLowerCase()) || null;
+      }
+
+      const checkPointDate = excelDateToString(r[1]);
+      const cxRating = r[2] !== null && r[2] !== undefined ? Number(r[2]) : null;
+
+      await storage.createCxRating({
+        projectId,
+        employeeId,
+        engagementName,
+        checkPointDate,
+        cxRating: isNaN(cxRating as number) ? null : cxRating,
+        resourceName,
+        isClientManager: String(r[4] || "").toUpperCase() === "Y",
+        isDeliveryManager: String(r[5] || "").toUpperCase() === "Y",
+        rationale: r[6] ? String(r[6]).trim() : null,
+      });
+      imported++;
+    } catch (err: any) {
+      errors.push(`Row ${i + 1}: ${err.message}`);
+    }
+  }
+  return { imported, errors };
+}
+
+async function importProjectResourceCost(ws: XLSX.WorkSheet): Promise<{ imported: number; errors: string[] }> {
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+  let imported = 0;
+  const errors: string[] = [];
+
+  const allEmployees = await storage.getEmployees();
+  const empMap = new Map<string, number>();
+  for (const e of allEmployees) {
+    const fullName = `${e.firstName} ${e.lastName}`.toLowerCase().trim();
+    empMap.set(fullName, e.id);
+  }
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !r[0]) continue;
+    const name = String(r[0]).trim();
+    if (!name || name.toLowerCase() === "name") continue;
+    try {
+      const employeeId = empMap.get(name.toLowerCase()) || null;
+      const staffType = r[1] ? String(r[1]).trim() : null;
+
+      let total = 0;
+      const monthlyCosts: string[] = [];
+      for (let ci = 2; ci <= 13; ci++) {
+        const v = Number(r[ci] || 0);
+        monthlyCosts.push(isNaN(v) ? "0" : v.toFixed(2));
+        total += isNaN(v) ? 0 : v;
+      }
+
+      await storage.createResourceCost({
+        employeeId,
+        employeeName: name,
+        staffType,
+        costPhase: "Total",
+        fyYear: "FY23-24",
+        costM1: monthlyCosts[0], costM2: monthlyCosts[1], costM3: monthlyCosts[2], costM4: monthlyCosts[3],
+        costM5: monthlyCosts[4], costM6: monthlyCosts[5], costM7: monthlyCosts[6], costM8: monthlyCosts[7],
+        costM9: monthlyCosts[8], costM10: monthlyCosts[9], costM11: monthlyCosts[10], costM12: monthlyCosts[11],
+        totalCost: total.toFixed(2),
+        source: "Project Resource Cost",
+      });
+      imported++;
+    } catch (err: any) {
+      errors.push(`Row ${i + 1}: ${err.message}`);
+    }
+  }
+  return { imported, errors };
+}
+
+async function importProjectResourceCostAF(ws: XLSX.WorkSheet): Promise<{ imported: number; errors: string[] }> {
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+  let imported = 0;
+  const errors: string[] = [];
+
+  const allEmployees = await storage.getEmployees();
+  const empMap = new Map<string, number>();
+  for (const e of allEmployees) {
+    const fullName = `${e.firstName} ${e.lastName}`.toLowerCase().trim();
+    empMap.set(fullName, e.id);
+  }
+
+  for (let i = 2; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !r[0]) continue;
+    const name = String(r[0]).trim();
+    if (!name || name.toLowerCase() === "name") continue;
+    try {
+      const employeeId = empMap.get(name.toLowerCase()) || null;
+      const staffType = r[1] ? String(r[1]).trim() : null;
+
+      let totalC = 0;
+      const costC: string[] = [];
+      for (let ci = 2; ci <= 13; ci++) {
+        const v = Number(r[ci] || 0);
+        costC.push(isNaN(v) ? "0" : v.toFixed(2));
+        totalC += isNaN(v) ? 0 : v;
+      }
+
+      await storage.createResourceCost({
+        employeeId,
+        employeeName: name,
+        staffType,
+        costPhase: "Phase C",
+        fyYear: "FY23-24",
+        costM1: costC[0], costM2: costC[1], costM3: costC[2], costM4: costC[3],
+        costM5: costC[4], costM6: costC[5], costM7: costC[6], costM8: costC[7],
+        costM9: costC[8], costM10: costC[9], costM11: costC[10], costM12: costC[11],
+        totalCost: totalC.toFixed(2),
+        source: "Project Resource Cost A&F",
+      });
+      imported++;
+
+      const dvfNameCol = 17;
+      const dvfName = r[dvfNameCol] ? String(r[dvfNameCol]).trim() : null;
+      if (dvfName && dvfName.toLowerCase() !== "name") {
+        const dvfEmployeeId = empMap.get(dvfName.toLowerCase()) || null;
+        const dvfStaffType = r[dvfNameCol + 1] ? String(r[dvfNameCol + 1]).trim() : null;
+        let totalDVF = 0;
+        const costDVF: string[] = [];
+        for (let ci = 19; ci <= 30; ci++) {
+          const v = Number(r[ci] || 0);
+          costDVF.push(isNaN(v) ? "0" : v.toFixed(2));
+          totalDVF += isNaN(v) ? 0 : v;
+        }
+
+        await storage.createResourceCost({
+          employeeId: dvfEmployeeId,
+          employeeName: dvfName,
+          staffType: dvfStaffType,
+          costPhase: "Phase DVF",
+          fyYear: "FY23-24",
+          costM1: costDVF[0], costM2: costDVF[1], costM3: costDVF[2], costM4: costDVF[3],
+          costM5: costDVF[4], costM6: costDVF[5], costM7: costDVF[6], costM8: costDVF[7],
+          costM9: costDVF[8], costM10: costDVF[9], costM11: costDVF[10], costM12: costDVF[11],
+          totalCost: totalDVF.toFixed(2),
+          source: "Project Resource Cost A&F",
+        });
+        imported++;
+      }
     } catch (err: any) {
       errors.push(`Row ${i + 1}: ${err.message}`);
     }
