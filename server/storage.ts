@@ -119,8 +119,21 @@ function sanitizeDateFields(data: Record<string, any>): Record<string, any> {
 async function insertReturning<T>(table: string, data: Record<string, any>): Promise<T> {
   const snakeData = sanitizeDateFields(toSnakeCase(data, table));
   delete snakeData.id;
-  const [row] = await db(table).insert(snakeData).returning("*");
-  return rowToModel<T>(row);
+  try {
+    const [row] = await db(table).insert(snakeData).returning("*");
+    return rowToModel<T>(row);
+  } catch (err: any) {
+    if (err.message && err.message.includes("date")) {
+      const dateFields: Record<string, any> = {};
+      for (const [k, v] of Object.entries(snakeData)) {
+        if (v !== null && v !== undefined && (DATE_COLUMNS.has(k) || typeof v === "string")) {
+          dateFields[k] = { value: v, type: typeof v };
+        }
+      }
+      console.error(`[insertReturning] ${table} date error. Fields:`, JSON.stringify(dateFields));
+    }
+    throw err;
+  }
 }
 
 async function updateReturning<T>(table: string, id: number, data: Record<string, any>): Promise<T | undefined> {
